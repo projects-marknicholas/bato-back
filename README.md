@@ -53,7 +53,33 @@ Before starting, make sure you have the following installed:
 
 ---
 
-## Step 4: Install Backend Dependencies
+## Step 4: Create the `.env` File
+
+1. Inside the `batospring` folder, create a file named `.env`.
+2. Add the following content to configure your environment variables:
+
+```
+DB_HOST=localhost
+DB_NAME=batospring
+DB_USER=root
+DB_PASS=
+BASEPATH=/batospring
+BREVO_API_KEY=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
+BREVO_SENDER_EMAIL=razonmarknicholas.cdlb@gmail.com
+
+BREVO_SENDER_NAME="Bato Spring Resort"
+APP_BASE_URL=http://localhost/batospring
+
+GOOGLE_CLIENT_ID=45342372111-87mmc9dsv68ds8nhjdcp7lqg7qaqueiq.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=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
+GOOGLE_AUTO_REGISTER=false
+```
+
+> ✅ The `.env` file stores sensitive configuration like database credentials and API keys. Do **not** share it publicly.
+
+---
+
+## Step 5: Install Backend Dependencies
 
 1. Open **VS Code**.
 2. Open the backend folder (`batospring`) in VS Code.
@@ -62,7 +88,7 @@ Before starting, make sure you have the following installed:
 
 > ✅ This will download and install all required PHP packages for the backend.
 
-## Step 5: Verify Backend Setup
+## Step 6: Verify Backend Setup
 - Check that the backend folder is inside ```htdocs```.
 - Make sure Apache and MySQL are running.
 - Your backend should now be ready to connect with the frontend.
