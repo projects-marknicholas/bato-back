@@ -52,6 +52,7 @@ class AuthController {
           'email_address' => $email,
           'password'      => password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT),
           'google_id'     => $googleId,
+          'status'        => 'active',
           'created_at'    => date('Y-m-d H:i:s'),
           'updated_at'    => date('Y-m-d H:i:s')
         ];
@@ -63,6 +64,15 @@ class AuthController {
 
         $user = $userData; 
       } else {
+        // 🚨 Check if suspended/banned before proceeding
+        if (in_array(strtolower($user['status']), ['suspended', 'banned'])) {
+          http_response_code(403);
+          return json_encode([
+            'success' => false,
+            'error'   => 'Your account has been ' . strtolower($user['status']) . '. Please contact support.'
+          ]);
+        }
+        
         // Update Google ID if not set
         if (empty($user['google_id'])) {
           Auth::updateGoogleId($user['id'], $googleId);

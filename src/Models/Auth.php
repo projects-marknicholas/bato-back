@@ -15,9 +15,9 @@ class Auth {
   public static function createUser($data) {
     $db = Database::connect();
     $sql = "INSERT INTO users 
-      (user_id, api_key, csrf_token, role, profile, first_name, last_name, email_address, password, google_id, created_at, updated_at) 
+      (user_id, api_key, csrf_token, role, status, profile, first_name, last_name, email_address, password, google_id, created_at, updated_at) 
       VALUES 
-      (:user_id, :api_key, :csrf_token, :role, :profile, :first_name, :last_name, :email_address, :password, :google_id, :created_at, :updated_at)";
+      (:user_id, :api_key, :csrf_token, :role, :status, :profile, :first_name, :last_name, :email_address, :password, :google_id, :created_at, :updated_at)";
     
     $stmt = $db->prepare($sql);
     return $stmt->execute($data);

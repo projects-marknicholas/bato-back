@@ -230,7 +230,7 @@ class Admin {
     $db = Database::connect();
 
     // Explicitly select only non-sensitive fields
-    $sql = "SELECT first_name, last_name, email_address, phone_number, address, role, created_at, updated_at
+    $sql = "SELECT first_name, last_name, email_address, phone_number, address, role, status, created_at, updated_at
             FROM users 
             WHERE 1=1";
     $params = [];
@@ -286,5 +286,587 @@ class Admin {
     $stmt->execute($params);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ? intval($row['total']) : 0;
+  }
+
+  public static function getAccountById($userId) {
+    try {
+      $db = Database::connect();
+      $stmt = $db->prepare("SELECT user_id FROM users WHERE user_id = :user_id LIMIT 1");
+      $stmt->execute([':user_id' => $userId]);
+      return $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+      error_log("getAccountById error: " . $e->getMessage());
+      return false;
+    }
+  }
+
+  public static function updateAccounts($userId, $updates) {
+    try {
+      $allowedFields = ['role', 'status'];
+      $fields = [];
+      $params = [':user_id' => $userId];
+
+      foreach ($updates as $key => $value) {
+        if (in_array($key, $allowedFields)) {
+          $fields[] = "$key = :$key";
+          $params[":$key"] = $value;
+        }
+      }
+
+      if (empty($fields)) {
+        return false; // nothing to update
+      }
+
+      $sql = "UPDATE users SET " . implode(', ', $fields) . ", updated_at = NOW() WHERE user_id = :user_id";
+
+      $db = Database::connect();
+      $stmt = $db->prepare($sql);
+      return $stmt->execute($params);
+
+    } catch (PDOException $e) {
+      error_log("updateAccounts error: " . $e->getMessage());
+      return false;
+    }
+  }
+
+  // FAQ
+  public static function isDuplicateFAQ($question, $answer) {
+    $db = Database::connect();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM faqs WHERE question = ? AND answer = ?");
+    $stmt->execute([$question, $answer]);
+    return $stmt->fetchColumn() > 0;
+  }
+
+  public static function createFAQ($faqData) {
+    $db = Database::connect();
+    $stmt = $db->prepare("
+      INSERT INTO faqs (faq_id, question, answer, category, status, created_at, updated_at)
+      VALUES (:faq_id, :question, :answer, :category, :status, :created_at, :updated_at)
+    ");
+    return $stmt->execute($faqData);
+  }
+
+  public static function getAllFAQs($limit, $offset, $search = '', $category = '', $status = '') {
+    $db = Database::connect();
+
+    $sql = "SELECT question, answer, category, status, created_at, updated_at FROM faqs WHERE 1=1";
+    $params = [];
+
+    if (!empty($search)) {
+      $sql .= " AND (question LIKE :search OR answer LIKE :search)";
+      $params[':search'] = "%$search%";
+    }
+
+    if (!empty($category)) {
+      $sql .= " AND category = :category";
+      $params[':category'] = $category;
+    }
+
+    if (!empty($status)) {
+      $sql .= " AND status = :status";
+      $params[':status'] = $status;
+    }
+
+    $sql .= " ORDER BY created_at DESC LIMIT :limit OFFSET :offset";
+
+    $stmt = $db->prepare($sql);
+
+    // Bind dynamic params
+    foreach ($params as $key => $value) {
+      $stmt->bindValue($key, $value);
+    }
+
+    // ✅ Force integer for limit and offset
+    $stmt->bindValue(':limit', (int)$limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
+
+    if ($stmt->execute()) {
+      return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    return false;
+  }
+
+  public static function getTotalFAQs($search = '', $category = '', $status = '') {
+    $db = Database::connect();
+
+    $sql = "SELECT COUNT(*) FROM faqs WHERE 1=1";
+    $params = [];
+
+    if (!empty($search)) {
+      $sql .= " AND (question LIKE ? OR answer LIKE ?)";
+      $params[] = "%$search%";
+      $params[] = "%$search%";
+    }
+
+    if (!empty($category)) {
+      $sql .= " AND category = ?";
+      $params[] = $category;
+    }
+
+    if (!empty($status)) {
+      $sql .= " AND status = ?";
+      $params[] = $status;
+    }
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+
+    return $stmt->fetchColumn();
+  }
+
+  public static function getFAQById($faqId) {
+    $db = Database::connect();
+    $stmt = $db->prepare("SELECT * FROM faqs WHERE faq_id = ?");
+    $stmt->execute([$faqId]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+  }
+
+  public static function updateFAQ($faqId, $updateData) {
+    $db = Database::connect();
+
+    $fields = [];
+    $params = [];
+
+    foreach ($updateData as $field => $value) {
+      $fields[] = "$field = ?";
+      $params[] = $value;
+    }
+
+    $params[] = $faqId;
+
+    $sql = "UPDATE faqs SET " . implode(", ", $fields) . ", updated_at = NOW() WHERE faq_id = ?";
+    $stmt = $db->prepare($sql);
+    return $stmt->execute($params);
+  }
+
+  public static function deleteFAQById($faqId) {
+    $db = Database::connect();
+    $stmt = $db->prepare("DELETE FROM faqs WHERE faq_id = ?");
+    return $stmt->execute([$faqId]);
+  }
+
+  public static function deleteFAQBatch($limit = 100) {
+    $db = Database::connect();
+    $stmt = $db->prepare("DELETE FROM faqs ORDER BY created_at ASC LIMIT ?");
+    $stmt->bindValue(1, (int)$limit, PDO::PARAM_INT);
+    $stmt->execute();
+    return $stmt->rowCount();
+  }
+
+  // Resources
+  public static function createResource($data) {
+    $db = Database::connect();
+    $sql = "INSERT INTO resources 
+            (resource_id, ammenities_id, image_id, resource_name, resource_type, capacity, status, day_rate, night_rate, description, latitude, longitude, created_at, updated_at)
+            VALUES (:resource_id, :ammenities_id, :image_id, :resource_name, :resource_type, :capacity, :status, :day_rate, :night_rate, :description, :latitude, :longitude, :created_at, :updated_at)";
+    $stmt = $db->prepare($sql);
+    return $stmt->execute($data);
+  }
+
+  public static function createResourceImage($data) {
+    $db = Database::connect();
+    $sql = "INSERT INTO resource_images (resource_id, image_id, path) 
+            VALUES (:resource_id, :image_id, :path)";
+    $stmt = $db->prepare($sql);
+    return $stmt->execute($data);
+  }
+
+  public static function createAmmenity($data) {
+    $db = Database::connect();
+    $sql = "INSERT INTO ammenities (resource_id, ammenities_id, ammenity) 
+            VALUES (:resource_id, :ammenities_id, :ammenity)";
+    $stmt = $db->prepare($sql);
+    return $stmt->execute($data);
+  }
+
+  public static function getAllResources($limit, $offset, $search = '', $status = '', $resourceType = '') {
+    $db = Database::connect();
+    $sql = "SELECT * FROM resources WHERE 1=1";
+    $params = [];
+
+    if (!empty($search)) {
+      $sql .= " AND (resource_name LIKE :search OR description LIKE :search)";
+      $params[':search'] = "%$search%";
+    }
+
+    if (!empty($status)) {
+      $sql .= " AND status = :status";
+      $params[':status'] = strtolower($status);
+    }
+
+    if (!empty($resourceType)) {
+      $sql .= " AND resource_type = :resource_type";
+      $params[':resource_type'] = $resourceType;
+    }
+
+    $sql .= " ORDER BY created_at DESC LIMIT :limit OFFSET :offset";
+    $stmt = $db->prepare($sql);
+
+    // Bind values
+    foreach ($params as $key => $val) {
+      $stmt->bindValue($key, $val);
+    }
+    $stmt->bindValue(':limit', (int)$limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
+
+    if ($stmt->execute()) {
+      return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+    return false;
+  }
+
+  public static function getTotalResources($search = '', $status = '', $resourceType = '') {
+    $db = Database::connect();
+    $sql = "SELECT COUNT(*) as total FROM resources WHERE 1=1";
+    $params = [];
+
+    if (!empty($search)) {
+      $sql .= " AND (resource_name LIKE :search OR description LIKE :search)";
+      $params[':search'] = "%$search%";
+    }
+
+    if (!empty($status)) {
+      $sql .= " AND status = :status";
+      $params[':status'] = strtolower($status);
+    }
+
+    if (!empty($resourceType)) {
+      $sql .= " AND resource_type = :resource_type";
+      $params[':resource_type'] = $resourceType;
+    }
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ? intval($row['total']) : false;
+  }
+
+  public static function getResourceImages($resourceId) {
+    $db = Database::connect();
+    $sql = "SELECT path FROM resource_images WHERE resource_id = :resource_id";
+    $stmt = $db->prepare($sql);
+    $stmt->execute([':resource_id' => $resourceId]);
+    return $stmt->fetchAll(PDO::FETCH_COLUMN);
+  }
+
+  public static function getResourceAmmenities($resourceId) {
+    $db = Database::connect();
+    $sql = "SELECT ammenity FROM ammenities WHERE resource_id = :resource_id";
+    $stmt = $db->prepare($sql);
+    $stmt->execute([':resource_id' => $resourceId]);
+    return $stmt->fetchAll(PDO::FETCH_COLUMN);
+  }
+
+  public static function updateResource($data) {
+    $db = Database::connect();
+    $sql = "UPDATE resources 
+            SET resource_name = :resource_name, resource_type = :resource_type,
+                capacity = :capacity, status = :status, day_rate = :day_rate, 
+                night_rate = :night_rate, description = :description, 
+                latitude = :latitude, longitude = :longitude, updated_at = :updated_at
+            WHERE resource_id = :resource_id";
+    $stmt = $db->prepare($sql);
+    return $stmt->execute($data);
+  }
+
+  public static function deleteResourceImages($resourceId) {
+    $db = Database::connect();
+    $sql = "DELETE FROM resource_images WHERE resource_id = :resource_id";
+    $stmt = $db->prepare($sql);
+    return $stmt->execute([':resource_id' => $resourceId]);
+  }
+
+  public static function deleteResourceAmmenities($resourceId) {
+    $db = Database::connect();
+    $sql = "DELETE FROM ammenities WHERE resource_id = :resource_id";
+    $stmt = $db->prepare($sql);
+    return $stmt->execute([':resource_id' => $resourceId]);
+  }
+
+  // Bookings & Reservations
+  public static function createBooking($data) {
+    $db = Database::connect();
+    $sql = "INSERT INTO bookings 
+            (booking_id, user_id, resource_id, check_in, check_out, guests, status, payment_status, rate, special_request, created_at, updated_at)
+            VALUES (:booking_id, :user_id, :resource_id, :check_in, :check_out, :guests, :status, :payment_status, :rate, :special_request, :created_at, :updated_at)";
+    $stmt = $db->prepare($sql);
+    return $stmt->execute($data);
+  }
+
+  public static function findUserById($userId) {
+    $db = Database::connect();
+    $sql = "SELECT user_id FROM users WHERE user_id = :user_id LIMIT 1";
+    $stmt = $db->prepare($sql);
+    $stmt->execute([':user_id' => $userId]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+  }
+
+  public static function findResourceById($resourceId) {
+    $db = Database::connect();
+    $sql = "SELECT resource_id FROM resources WHERE resource_id = :resource_id LIMIT 1";
+    $stmt = $db->prepare($sql);
+    $stmt->execute([':resource_id' => $resourceId]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+  }
+
+  public static function getAllBookings($limit, $offset, $search = '', $status = '', $paymentStatus = '', $userId = '', $resourceId = '') {
+    $db = Database::connect();
+
+    $sql = "SELECT 
+              u.first_name,
+              u.last_name,
+              r.resource_name,
+              b.check_in,
+              b.check_out,
+              b.guests,
+              b.status,
+              b.payment_status,
+              b.special_request,
+              b.created_at,
+              b.updated_at
+            FROM bookings b
+            JOIN users u ON b.user_id = u.user_id
+            JOIN resources r ON b.resource_id = r.resource_id
+            WHERE 1=1";
+
+    $params = [];
+
+    if (!empty($search)) {
+      $sql .= " AND (u.first_name LIKE :search OR u.last_name LIKE :search OR r.resource_name LIKE :search OR b.special_request LIKE :search)";
+      $params[':search'] = "%$search%";
+    }
+
+    if (!empty($status)) {
+      $sql .= " AND b.status = :status";
+      $params[':status'] = $status;
+    }
+
+    if (!empty($paymentStatus)) {
+      $sql .= " AND b.payment_status = :payment_status";
+      $params[':payment_status'] = $paymentStatus;
+    }
+
+    if (!empty($userId)) {
+      $sql .= " AND b.user_id = :user_id";
+      $params[':user_id'] = $userId;
+    }
+
+    if (!empty($resourceId)) {
+      $sql .= " AND b.resource_id = :resource_id";
+      $params[':resource_id'] = $resourceId;
+    }
+
+    $sql .= " ORDER BY b.created_at DESC LIMIT :limit OFFSET :offset";
+
+    $stmt = $db->prepare($sql);
+
+    foreach ($params as $key => $value) {
+      $stmt->bindValue($key, $value);
+    }
+
+    $stmt->bindValue(':limit', (int) $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', (int) $offset, PDO::PARAM_INT);
+
+    if ($stmt->execute()) {
+      return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    return false;
+  }
+
+  public static function getTotalBookings($search = '', $status = '', $paymentStatus = '', $userId = '', $resourceId = '') {
+    $db = Database::connect();
+
+    $sql = "SELECT COUNT(*) as total
+            FROM bookings b
+            JOIN users u ON b.user_id = u.user_id
+            JOIN resources r ON b.resource_id = r.resource_id
+            WHERE 1=1";
+
+    $params = [];
+
+    if (!empty($search)) {
+      $sql .= " AND (u.first_name LIKE :search OR r.resource_name LIKE :search OR b.special_request LIKE :search)";
+      $params[':search'] = "%$search%";
+    }
+
+    if (!empty($status)) {
+      $sql .= " AND b.status = :status";
+      $params[':status'] = $status;
+    }
+
+    if (!empty($paymentStatus)) {
+      $sql .= " AND b.payment_status = :payment_status";
+      $params[':payment_status'] = $paymentStatus;
+    }
+
+    if (!empty($userId)) {
+      $sql .= " AND b.user_id = :user_id";
+      $params[':user_id'] = $userId;
+    }
+
+    if (!empty($resourceId)) {
+      $sql .= " AND b.resource_id = :resource_id";
+      $params[':resource_id'] = $resourceId;
+    }
+
+    $stmt = $db->prepare($sql);
+
+    foreach ($params as $key => $value) {
+      $stmt->bindValue($key, $value);
+    }
+
+    if ($stmt->execute()) {
+      $row = $stmt->fetch(PDO::FETCH_ASSOC);
+      return $row ? (int) $row['total'] : 0;
+    }
+
+    return false;
+  }
+
+  public static function updateBooking($bookingId, $status, $paymentStatus) {
+    $db = Database::connect();
+
+    $sql = "UPDATE bookings 
+            SET status = :status, 
+                payment_status = :payment_status, 
+                updated_at = NOW()
+            WHERE booking_id = :booking_id";
+
+    $stmt = $db->prepare($sql);
+    $stmt->bindParam(':status', $status);
+    $stmt->bindParam(':payment_status', $paymentStatus);
+    $stmt->bindParam(':booking_id', $bookingId);
+
+    return $stmt->execute();
+  }
+
+  public static function findBookingById($bookingId) {
+    $db = Database::connect();
+    $sql = "SELECT * FROM bookings WHERE booking_id = :booking_id LIMIT 1";
+    $stmt = $db->prepare($sql);
+    $stmt->bindParam(':booking_id', $bookingId);
+    $stmt->execute();
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+  }
+
+  public static function getGuests($limit, $offset, $search = '') {
+    $db = Database::connect();
+    $searchLike = '%' . $search . '%';
+
+    $sql = "
+      SELECT 
+        u.user_id,
+        u.first_name,
+        u.last_name,
+        u.email_address,
+        u.phone_number,
+        COUNT(b.booking_id) AS total_visits,
+        MAX(b.check_out) AS last_visit,
+        SUM(
+          CASE 
+            WHEN b.rate = 'day' 
+              THEN r.day_rate * TIMESTAMPDIFF(DAY, b.check_in, b.check_out) * b.guests
+            WHEN b.rate = 'night' 
+              THEN r.night_rate * TIMESTAMPDIFF(DAY, b.check_in, b.check_out) * b.guests
+            ELSE 0
+          END
+        ) AS total_spent
+      FROM bookings b
+      INNER JOIN users u ON b.user_id = u.user_id
+      INNER JOIN resources r ON b.resource_id = r.resource_id
+      WHERE b.status = 'confirmed' 
+        AND b.payment_status = 'paid'
+        AND (
+          u.first_name LIKE :search OR 
+          u.last_name LIKE :search OR 
+          u.email_address LIKE :search OR 
+          u.phone_number LIKE :search
+        )
+      GROUP BY u.user_id, u.first_name, u.last_name, u.email_address, u.phone_number
+      ORDER BY total_spent DESC
+      LIMIT :limit OFFSET :offset
+    ";
+
+    $stmt = $db->prepare($sql);
+    $stmt->bindValue(':search', $searchLike, PDO::PARAM_STR);
+    $stmt->bindValue(':limit', (int) $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', (int) $offset, PDO::PARAM_INT);
+
+    if ($stmt->execute()) {
+      $guests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+      // Add rank + normalize field names
+      $rank = $offset + 1;
+      foreach ($guests as &$guest) {
+        $guest['rank'] = $rank++;
+      }
+
+      return $guests;
+    }
+
+    return false;
+  }
+
+  public static function getTotalGuests($search = '') {
+    $db = Database::connect();
+    $searchLike = '%' . $search . '%';
+
+    $sql = "
+      SELECT COUNT(DISTINCT u.user_id) AS total
+      FROM bookings b
+      INNER JOIN users u ON b.user_id = u.user_id
+      WHERE b.status = 'confirmed' 
+        AND b.payment_status = 'paid'
+        AND (
+          u.first_name LIKE :search OR 
+          u.last_name LIKE :search OR 
+          u.email_address LIKE :search OR 
+          u.phone_number LIKE :search
+        )
+    ";
+
+    $stmt = $db->prepare($sql);
+    $stmt->bindValue(':search', $searchLike, PDO::PARAM_STR);
+
+    if ($stmt->execute()) {
+      return (int) $stmt->fetchColumn();
+    }
+
+    return false;
+  }
+
+  public static function getGuestsWithTotalSpent($limit, $offset, $search = '') {
+    $db = Database::connect();
+
+    $query = "
+      SELECT u.user_id, u.first_name, u.last_name, u.email_address,
+             COALESCE(SUM(
+               CASE b.rate
+                 WHEN 'day' THEN r.day_rate * TIMESTAMPDIFF(DAY, b.check_in, b.check_out) * b.guests
+                 WHEN 'night' THEN r.night_rate * TIMESTAMPDIFF(DAY, b.check_in, b.check_out) * b.guests
+                 ELSE 0
+               END
+             ), 0) AS total_spent
+      FROM users u
+      LEFT JOIN bookings b ON u.user_id = b.user_id
+      LEFT JOIN resources r ON b.resource_id = r.resource_id
+      WHERE u.first_name LIKE :search OR u.last_name LIKE :search OR u.email_address LIKE :search
+      GROUP BY u.user_id
+      ORDER BY u.first_name ASC
+      LIMIT :limit OFFSET :offset
+    ";
+
+    $stmt = $db->prepare($query);
+    $stmt->bindValue(':search', "%$search%", PDO::PARAM_STR);
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+
+    if (!$stmt->execute()) {
+      return false;
+    }
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
   }
 }

@@ -42,6 +42,26 @@ $router->delete('/admin/news', [App\Controllers\AdminController::class, 'deleteN
 
 // Accounts
 $router->get('/admin/accounts', [App\Controllers\AdminController::class, 'getAccounts']);
+$router->put('/admin/accounts', [App\Controllers\AdminController::class, 'updateAccount']);
+
+// FAQ
+$router->post('/admin/faqs', [App\Controllers\AdminController::class, 'createFAQ']);
+$router->get('/admin/faqs', [App\Controllers\AdminController::class, 'getFAQ']);
+$router->put('/admin/faqs', [App\Controllers\AdminController::class, 'updateFAQ']);
+$router->delete('/admin/faqs', [App\Controllers\AdminController::class, 'deleteFAQ']);
+
+// Resources
+$router->post('/admin/resources', [App\Controllers\AdminController::class, 'createResource']);
+$router->get('/admin/resources', [App\Controllers\AdminController::class, 'getResources']);
+$router->put('/admin/resources', [App\Controllers\AdminController::class, 'updateResource']);
+
+// Bookings & Reservations
+$router->post('/admin/bookings', [App\Controllers\AdminController::class, 'createBooking']);
+$router->get('/admin/bookings', [App\Controllers\AdminController::class, 'getBookings']);
+$router->put('/admin/bookings', [App\Controllers\AdminController::class, 'updateBooking']);
+
+// Guests List
+$router->get('/admin/guests', [App\Controllers\AdminController::class, 'getGuests']);
 // ====== ADMIN START ====== //
 
 $router->resolve();
