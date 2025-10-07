@@ -57,6 +57,8 @@ class AdminController {
       'first_name'    => $admin['first_name'] ?? '',
       'last_name'     => $admin['last_name'] ?? '',
       'email_address' => $admin['email_address'] ?? '',
+      'phone_number'  => $admin['phone_number'] ?? '',
+      'address'       => $admin['address'] ?? '',
       'created_at'    => $admin['created_at'] ?? '',
       'updated_at'    => $admin['updated_at'] ?? ''
     ];
@@ -184,6 +186,12 @@ class AdminController {
     }
 
     $newsId = bin2hex(random_bytes(16));
+
+    // Handle event_date - set to current date if empty or null
+    $eventDate = $data['event_date'] ?? null;
+    if (empty($eventDate)) {
+        $eventDate = date('Y-m-d');
+    }
 
     $newsData = [
       'user_id'     => $admin['user_id'],

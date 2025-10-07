@@ -62,6 +62,12 @@ $router->put('/admin/bookings', [App\Controllers\AdminController::class, 'update
 
 // Guests List
 $router->get('/admin/guests', [App\Controllers\AdminController::class, 'getGuests']);
-// ====== ADMIN START ====== //
+// ====== ADMIN END ====== //
+
+// ====== GUEST START ====== //
+// Profile
+$router->get('/guest/profile', [App\Controllers\GuestController::class, 'getProfile']);
+$router->put('/guest/profile', [App\Controllers\GuestController::class, 'updateProfile']);
+// ====== GUEST END ====== //
 
 $router->resolve();

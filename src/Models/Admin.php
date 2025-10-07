@@ -230,7 +230,7 @@ class Admin {
     $db = Database::connect();
 
     // Explicitly select only non-sensitive fields
-    $sql = "SELECT first_name, last_name, email_address, phone_number, address, role, status, created_at, updated_at
+    $sql = "SELECT user_id, profile, first_name, last_name, email_address, phone_number, address, role, status, created_at, updated_at
             FROM users 
             WHERE 1=1";
     $params = [];
@@ -349,7 +349,7 @@ class Admin {
   public static function getAllFAQs($limit, $offset, $search = '', $category = '', $status = '') {
     $db = Database::connect();
 
-    $sql = "SELECT question, answer, category, status, created_at, updated_at FROM faqs WHERE 1=1";
+    $sql = "SELECT faq_id, question, answer, category, status, created_at, updated_at FROM faqs WHERE 1=1";
     $params = [];
 
     if (!empty($search)) {
@@ -615,17 +615,29 @@ class Admin {
     $db = Database::connect();
 
     $sql = "SELECT 
+              b.booking_id,
               u.first_name,
               u.last_name,
               r.resource_name,
+              r.day_rate,
+              r.night_rate,
               b.check_in,
               b.check_out,
               b.guests,
               b.status,
               b.payment_status,
+              b.rate,
               b.special_request,
               b.created_at,
-              b.updated_at
+              b.updated_at,
+              -- Calculate amount based on rate type and duration
+              CASE 
+                WHEN b.rate = 'day' THEN 
+                  r.day_rate
+                WHEN b.rate = 'night' THEN 
+                  r.night_rate
+                ELSE 0
+              END as amount
             FROM bookings b
             JOIN users u ON b.user_id = u.user_id
             JOIN resources r ON b.resource_id = r.resource_id
@@ -752,6 +764,7 @@ class Admin {
     return $stmt->fetch(PDO::FETCH_ASSOC);
   }
 
+  // Guests
   public static function getGuests($limit, $offset, $search = '') {
     $db = Database::connect();
     $searchLike = '%' . $search . '%';
@@ -763,30 +776,31 @@ class Admin {
         u.last_name,
         u.email_address,
         u.phone_number,
+        u.address,
+        u.created_at,
         COUNT(b.booking_id) AS total_visits,
         MAX(b.check_out) AS last_visit,
         SUM(
           CASE 
-            WHEN b.rate = 'day' 
-              THEN r.day_rate * TIMESTAMPDIFF(DAY, b.check_in, b.check_out) * b.guests
-            WHEN b.rate = 'night' 
-              THEN r.night_rate * TIMESTAMPDIFF(DAY, b.check_in, b.check_out) * b.guests
+            WHEN b.rate = 'day' AND b.status = 'confirmed' AND b.payment_status = 'paid'
+              THEN r.day_rate
+            WHEN b.rate = 'night' AND b.status = 'confirmed' AND b.payment_status = 'paid'
+              THEN r.night_rate
             ELSE 0
           END
         ) AS total_spent
-      FROM bookings b
-      INNER JOIN users u ON b.user_id = u.user_id
-      INNER JOIN resources r ON b.resource_id = r.resource_id
-      WHERE b.status = 'confirmed' 
-        AND b.payment_status = 'paid'
-        AND (
+      FROM users u
+      LEFT JOIN bookings b ON u.user_id = b.user_id
+      LEFT JOIN resources r ON b.resource_id = r.resource_id
+      WHERE (
           u.first_name LIKE :search OR 
           u.last_name LIKE :search OR 
           u.email_address LIKE :search OR 
           u.phone_number LIKE :search
         )
-      GROUP BY u.user_id, u.first_name, u.last_name, u.email_address, u.phone_number
-      ORDER BY total_spent DESC
+        AND u.user_id IN (SELECT DISTINCT user_id FROM bookings) -- Only users who have booked
+      GROUP BY u.user_id, u.first_name, u.last_name, u.email_address, u.phone_number, u.address, u.created_at
+      ORDER BY total_visits DESC, total_spent DESC
       LIMIT :limit OFFSET :offset
     ";
 
@@ -798,7 +812,7 @@ class Admin {
     if ($stmt->execute()) {
       $guests = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-      // Add rank + normalize field names
+      // Add rank based on visits
       $rank = $offset + 1;
       foreach ($guests as &$guest) {
         $guest['rank'] = $rank++;
@@ -816,16 +830,14 @@ class Admin {
 
     $sql = "
       SELECT COUNT(DISTINCT u.user_id) AS total
-      FROM bookings b
-      INNER JOIN users u ON b.user_id = u.user_id
-      WHERE b.status = 'confirmed' 
-        AND b.payment_status = 'paid'
-        AND (
+      FROM users u
+      WHERE (
           u.first_name LIKE :search OR 
           u.last_name LIKE :search OR 
           u.email_address LIKE :search OR 
           u.phone_number LIKE :search
         )
+        AND u.user_id IN (SELECT DISTINCT user_id FROM bookings) -- Only users who have booked
     ";
 
     $stmt = $db->prepare($sql);
@@ -836,37 +848,5 @@ class Admin {
     }
 
     return false;
-  }
-
-  public static function getGuestsWithTotalSpent($limit, $offset, $search = '') {
-    $db = Database::connect();
-
-    $query = "
-      SELECT u.user_id, u.first_name, u.last_name, u.email_address,
-             COALESCE(SUM(
-               CASE b.rate
-                 WHEN 'day' THEN r.day_rate * TIMESTAMPDIFF(DAY, b.check_in, b.check_out) * b.guests
-                 WHEN 'night' THEN r.night_rate * TIMESTAMPDIFF(DAY, b.check_in, b.check_out) * b.guests
-                 ELSE 0
-               END
-             ), 0) AS total_spent
-      FROM users u
-      LEFT JOIN bookings b ON u.user_id = b.user_id
-      LEFT JOIN resources r ON b.resource_id = r.resource_id
-      WHERE u.first_name LIKE :search OR u.last_name LIKE :search OR u.email_address LIKE :search
-      GROUP BY u.user_id
-      ORDER BY u.first_name ASC
-      LIMIT :limit OFFSET :offset
-    ";
-
-    $stmt = $db->prepare($query);
-    $stmt->bindValue(':search', "%$search%", PDO::PARAM_STR);
-    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-
-    if (!$stmt->execute()) {
-      return false;
-    }
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
   }
 }
